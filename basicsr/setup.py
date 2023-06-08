@@ -4,9 +4,12 @@ from setuptools import find_packages, setup
 
 import os
 import subprocess
+import sys
 import time
+from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
+from utils.misc import gpu_is_available
 
-version_file = 'basicsr/version.py'
+version_file = './basicsr/version.py'
 
 
 def readme():
@@ -43,13 +46,12 @@ def get_git_hash():
 def get_hash():
     if os.path.exists('.git'):
         sha = get_git_hash()[:7]
-    # currently ignore this
-    # elif os.path.exists(version_file):
-    #     try:
-    #         from basicsr.version import __version__
-    #         sha = __version__.split('+')[-1]
-    #     except ImportError:
-    #         raise ImportError('Unable to get git version')
+    elif os.path.exists(version_file):
+        try:
+            from version import __version__
+            sha = __version__.split('+')[-1]
+        except ImportError:
+            raise ImportError('Unable to get git version')
     else:
         sha = 'unknown'
 
@@ -64,7 +66,7 @@ __gitsha__ = '{}'
 version_info = ({})
 """
     sha = get_hash()
-    with open('VERSION', 'r') as f:
+    with open('./basicsr/VERSION', 'r') as f:
         SHORT_VERSION = f.read().strip()
     VERSION_INFO = ', '.join([x if x.isdigit() else f'"{x}"' for x in SHORT_VERSION.split('.')])
 
@@ -85,7 +87,8 @@ def make_cuda_ext(name, module, sources, sources_cuda=None):
     define_macros = []
     extra_compile_args = {'cxx': []}
 
-    if torch.cuda.is_available() or os.getenv('FORCE_CUDA', '0') == '1':
+    # if torch.cuda.is_available() or os.getenv('FORCE_CUDA', '0') == '1':
+    if gpu_is_available or os.getenv('FORCE_CUDA', '0') == '1':
         define_macros += [('WITH_CUDA', None)]
         extension = CUDAExtension
         extra_compile_args['nvcc'] = [
@@ -106,46 +109,37 @@ def make_cuda_ext(name, module, sources, sources_cuda=None):
 
 
 def get_requirements(filename='requirements.txt'):
-    here = os.path.dirname(os.path.realpath(__file__))
-    with open(os.path.join(here, filename), 'r') as f:
+    with open(os.path.join('.', filename), 'r') as f:
         requires = [line.replace('\n', '') for line in f.readlines()]
     return requires
 
 
 if __name__ == '__main__':
-    cuda_ext = os.getenv('BASICSR_EXT')  # whether compile cuda ext
-    if cuda_ext == 'True':
-        try:
-            import torch
-            from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
-        except ImportError:
-            raise ImportError('Unable to import torch - torch is needed to build cuda extensions')
-
+    if '--cuda_ext' in sys.argv:
         ext_modules = [
             make_cuda_ext(
                 name='deform_conv_ext',
-                module='basicsr.ops.dcn',
+                module='ops.dcn',
                 sources=['src/deform_conv_ext.cpp'],
                 sources_cuda=['src/deform_conv_cuda.cpp', 'src/deform_conv_cuda_kernel.cu']),
             make_cuda_ext(
                 name='fused_act_ext',
-                module='basicsr.ops.fused_act',
+                module='ops.fused_act',
                 sources=['src/fused_bias_act.cpp'],
                 sources_cuda=['src/fused_bias_act_kernel.cu']),
             make_cuda_ext(
                 name='upfirdn2d_ext',
-                module='basicsr.ops.upfirdn2d',
+                module='ops.upfirdn2d',
                 sources=['src/upfirdn2d.cpp'],
                 sources_cuda=['src/upfirdn2d_kernel.cu']),
         ]
-        setup_kwargs = dict(cmdclass={'build_ext': BuildExtension})
+        sys.argv.remove('--cuda_ext')
     else:
         ext_modules = []
-        setup_kwargs = dict()
 
     write_version_py()
     setup(
-        name='basicsr',
+        name='',
         version=get_version(),
         description='Open Source Image and Video Super-Resolution Toolbox',
         long_description=readme(),
@@ -153,7 +147,7 @@ if __name__ == '__main__':
         author='Xintao Wang',
         author_email='xintao.wang@outlook.com',
         keywords='computer vision, restoration, super resolution',
-        url='https://github.com/xinntao/BasicSR',
+        url='https://github.com/xinntao/basicsr',
         include_package_data=True,
         packages=find_packages(exclude=('options', 'datasets', 'experiments', 'results', 'tb_logger', 'wandb')),
         classifiers=[
@@ -168,5 +162,5 @@ if __name__ == '__main__':
         setup_requires=['cython', 'numpy'],
         install_requires=get_requirements(),
         ext_modules=ext_modules,
-        zip_safe=False,
-        **setup_kwargs)
+        cmdclass={'build_ext': BuildExtension},
+        zip_safe=False)
